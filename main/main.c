@@ -423,11 +423,10 @@ is_tag(
 /**
  *  Look at the text string to see if it is a valid e-mail tag.
  *
- *  @param  argc                Number of command line parameters.
- *  @param  argv                Indexed list of command line parameters
+ *  @param  input_file_name     Full path-name of the input file.
  *
- *  @return is_tag_rc           TRUE when the input line is a valid e-mail
- *                              tag; else FALSE is returned.
+ *  @return out_file_fp         Upon successful completion a file pointer
+ *                              to the output file, else NULL is returned.
  *
  *  @note
  *      Valid e-mail tags are a string of alpha and hyphen [-] characters
@@ -438,23 +437,20 @@ is_tag(
 static
 FILE    *
 open_output_file (
-    void
+    char                        *   input_file_name_p
     )
 {
     /**
-     * @param file_num_p        Pointer to the file name.                   */
-    char                        *   file_name_p;
+     *  @param  tmp_p           Pointer for temporary use.                  */
+    char                        *   tmp_p;
     /**
-     * @param next_num_p        Pointer to the next file name.              */
-    char                        *   next_name_p;
+     *  @param  out_file_name   File name for the output file               */
+    char                            out_file_name[  FILE_NAME_L ];
     /**
-     *  @param  file_num_val    Value of the stored file number             */
-    int                             file_num_val;
-    /**
-     * @param out_name          Encoded output file name                    */
+     *  @param  out_name        Encoded output file name                    */
     char                            out_name[ ( FILE_NAME_L * 3 ) ];
     /**
-     * @param input_file_fp     Output File pointer                         */
+     *  @param  input_file_fp   Output File pointer                         */
     FILE                        *   out_file_fp;
 
     /************************************************************************
@@ -466,50 +462,38 @@ open_output_file (
 
     //  Clean out the fully qualified file name buffer
     memset( out_name, '\0', ( FILE_NAME_L * 3 ) );
+    memset( out_file_name, '\0', sizeof( out_file_name ) );
 
     /************************************************************************
-     *  Get the current file number increment it and save it.
+     *  Get the input file name [ONLY]
      ************************************************************************/
 
-    //  Put the current file number.
-    file_name_p = store_get( "FILE_NUM" );
+    //  Start with a copy of the input file name.
+    strncpy( out_file_name, input_file_name_p, FILE_NAME_L );
 
-    //  Allocate storage for the next file number
-    next_name_p = mem_malloc( strlen( file_name_p + 1 ) );
+    //  Locate the end of the path name
+    tmp_p = strrchr( out_file_name, '/' );
 
-    //  Success ?
-    if ( file_name_p == NULL )
+    //  Did we locate it ?
+    if ( tmp_p != NULL )
     {
-        //  NO:     OOPS, this shouldn't happen.
-        log_write( MID_FATAL, "open_output_file",
-                "Unable to get the current file number." );
+        //  YES:    Now remove the path information leaving only the file name
+        text_remove( &out_file_name[ 0 ], 0, ( 1 + tmp_p - &out_file_name[ 0 ] ) );
     }
-
-    //  Convert the recipe number string to an integer
-    file_num_val = atoi( file_name_p );
-
-    //  And increment it
-    file_num_val += 1;
-
-    //  Back to a string
-    snprintf( next_name_p, ( strlen( file_name_p ) + 1 ), "%016d", file_num_val );
-
-    //  Put the incremented file number which is now the current file number.
-    store_put( "FILE_NUM", next_name_p );
 
     /************************************************************************
      *  Build the directory/file name and create directories when needed.
      ************************************************************************/
 
+    //  If the directory does not already exist, create it.
+    file_dir_exist( out_dir_name_p, true );
+
     //  Start building the output name
     snprintf( out_name, sizeof( out_name ), "%s", out_dir_name_p );
 
-    //  If the directory does not already exist, create it.
-    file_dir_exist( out_name, true );
-
     //  Build the fully qualified file name.
     snprintf( out_name, sizeof( out_name ),
-              "%s/%s.txt", out_dir_name_p, file_name_p );
+              "%s/%s", out_dir_name_p, out_file_name );
 
     /************************************************************************
      *  Open the file for write
@@ -517,13 +501,11 @@ open_output_file (
 
     //  Open the input file
     out_file_fp = file_open_write( out_name );
+//  log_write( MID_INFO, "main", "Open  - [%X] %s'\n",  out_file_fp, out_name );
 
     /************************************************************************
      *  Function Exit
      ************************************************************************/
-
-    //  Release the allocated storage.
-    mem_free( next_name_p );
 
     //  DONE!
     return( out_file_fp );
@@ -573,9 +555,6 @@ main(
      * @param input_file_fp     Input File pointer                          */
     FILE                        *   in_file_fp;
     /**
-     * @param source_info_p     Pointer to source data information          */
-    struct  source_info_t       *   source_info_p;
-    /**
      * @param read_data_p       Pointer to the raw read data                */
     char                        *   read_data_p;
     /**
@@ -608,7 +587,7 @@ main(
 
     //  Set the starting decode state
     decode_state = DS_IDLE;
-    
+
     //  Allocate a data buffer for the read data.
     from_data_p = mem_malloc( MAX_LINE_L );
 
@@ -649,7 +628,7 @@ main(
     log_write( MID_INFO, "main",
                   "|==============================================|\n" );
     log_write( MID_INFO, "main",
-                  "Starting: Recipe Import Assist Version %s %s.\n",
+                  "Starting: MBox-to-Txt Version %s %s.\n",
                   __DATE__, __TIME__ );
 
     for ( int count = 0;
@@ -725,39 +704,24 @@ main(
 
         //  Open the input file
         in_file_fp = file_open_read( input_file_name );
-
-        //  Is there an output file opened ?
-        if ( out_file_fp != NULL )
-        {
-            //  YES:    Close it
-            file_close( out_file_fp );
-        }
+//      log_write( MID_INFO, "main", "Open  - [%X] %s'\n",  in_file_fp, input_file_name );
 
         //  Open a new output file.
-        out_file_fp = open_output_file( );
-
+        out_file_fp = open_output_file( input_file_name );
         //  Log the event
         log_write( MID_INFO, "main",
                    "Working on file: '%s'\n", input_file_name );
 
-        //  Create a new source information structure
-        source_info_p = mem_malloc( sizeof( struct source_info_t ) );
-
-        log_write( MID_DEBUG_1, "main.c", "Line: %d\n", __LINE__ );
-
-        //  Copy file information into source information structure
-        strncpy( source_info_p->f_dir_name, file_info_p->dir_name,
-                 sizeof( source_info_p->f_dir_name ) );
-        strncpy( source_info_p->f_file_name, file_info_p->file_name,
-                 sizeof( source_info_p->f_file_name ) );
-        strncpy( source_info_p->f_date_time, file_info_p->date_time,
-                 sizeof( source_info_p->f_date_time ) );
-        strncpy( source_info_p->f_file_size, file_info_p->file_size,
-                 sizeof( source_info_p->f_file_size ) );
-
         /********************************************************************
          *  Process the file
          ********************************************************************/
+
+        //  Free storage for the tag buffers.
+        tag_1_data_p = NULL;
+        tag_2_data_p = NULL;
+        tag_3_data_p = NULL;
+        read_data_p  = NULL;
+
         do
         {
             //  Read another line from the file
@@ -776,18 +740,39 @@ main(
                     //  Is the current input line a valid 'From ' line ?
                     if ( is_from( read_data_p ) == true )
                     {
-                        //  YES:    Initialize the tag data pointers
-                        tag_1_data_p = NULL;
-                        tag_2_data_p = NULL;
-                        tag_3_data_p = NULL;
-
-                        //  Save the 'From ' line text
+                        //  YES:    Save the 'From ' line text
                         memset( from_data_p, '\0', MAX_LINE_L );
-                        memcpy( from_data_p, read_data_p, strlen( read_data_p ) );
+
+                        //  Will the read data fit into the holding buffer ?
+                        if ( strlen( read_data_p ) < ( MAX_LINE_L - 1 ) )
+                        {
+                            //  YES:    Save it.
+                            memcpy( from_data_p, read_data_p, strlen( read_data_p ) );
+                        }
+                        else
+                        {
+                            //  NO:     Just write it to the open output file.
+                            fprintf( out_file_fp, "%s\n", read_data_p  );
+                            mem_free( read_data_p  );   read_data_p  = NULL;
+
+                            //  Set the next state.
+                            decode_state = DS_EMAIL_BODY;
+                            break;
+                        }
 
                         //  Set the next state.
                         decode_state = DS_TAG_1;
                     }
+                    else
+                    {
+                        //  NO:     Just write it to the open output file.
+                        fprintf( out_file_fp, "%s\n", read_data_p  );
+                        mem_free( read_data_p  );   read_data_p  = NULL;
+
+                        //  Set the next state.
+                        decode_state = DS_EMAIL_BODY;
+                    }
+
                 }   break;
                 //  ########
                 case        DS_TAG_1:
@@ -853,7 +838,7 @@ main(
                         text_insert( from_data_p, MAX_LINE_L, 4, " -" );
 
                         //  Log the new e-mail
-                        log_write( MID_INFO, "main", "%s'\n", from_data_p );
+//                      log_write( MID_INFO, "main", "%s'\n", from_data_p );
 
                         //  Write the saved data to the file
                         fprintf( out_file_fp, "%s\n", from_data_p  );
@@ -863,9 +848,10 @@ main(
                         fprintf( out_file_fp, "%s\n", read_data_p  );
 
                         //  Free storage for the tag buffers.
-                        mem_free( tag_1_data_p );
-                        mem_free( tag_2_data_p );
-                        mem_free( tag_3_data_p );
+                        mem_free( tag_1_data_p );   tag_1_data_p = NULL;
+                        mem_free( tag_2_data_p );   tag_2_data_p = NULL;
+                        mem_free( tag_3_data_p );   tag_3_data_p = NULL;
+                        mem_free( read_data_p  );   read_data_p  = NULL;
 
                         //  Set the next state.
                         decode_state = DS_EMAIL_BODY;
@@ -879,21 +865,38 @@ main(
                     {
                         //  NO:     Just write it to the open output file.
                         fprintf( out_file_fp, "%s\n", read_data_p  );
+                        mem_free( read_data_p  );   read_data_p  = NULL;
                     }
                     else
                     {
-                        //  YES:    Initialize the tag data pointers
-                        tag_1_data_p = NULL;
-                        tag_2_data_p = NULL;
-                        tag_3_data_p = NULL;
-
-                        //  Save the 'From ' line text
+                        //  YES:    Save the 'From ' line text
                         memset( from_data_p, '\0', MAX_LINE_L );
-                        memcpy( from_data_p, read_data_p, strlen( read_data_p ) );
+
+                        //  Will the read data fit into the holding buffer ?
+                        if ( strlen( read_data_p ) < ( MAX_LINE_L - 1 ) )
+                        {
+                            //  YES:    Save it.
+                            memcpy( from_data_p, read_data_p, strlen( read_data_p ) );
+                        }
+                        else
+                        {
+                            //  NO:     Just write it to the open output file.
+                            fprintf( out_file_fp, "%s\n", read_data_p  );
+                            mem_free( read_data_p  );   read_data_p  = NULL;
+
+                            //  Set the next state.
+                            decode_state = DS_EMAIL_BODY;
+                            break;
+                        }
 
                         //  Set the next state.
                         decode_state = DS_NEW_TAG_1;
+                        break;
                     }
+
+                    //  Set the next state.
+                    decode_state = DS_EMAIL_BODY;
+
                 }   break;
                 //  ########
                 case        DS_NEW_TAG_1:
@@ -913,6 +916,9 @@ main(
                         //          buffered lines.
                         fprintf( out_file_fp, "%s\n", from_data_p  );
                         fprintf( out_file_fp, "%s\n", read_data_p  );
+
+                        //  Free storage for the tag buffers.
+                        mem_free( read_data_p  );   read_data_p  = NULL;
 
                         //  Continue with the current e-mail
                         decode_state = DS_EMAIL_BODY;
@@ -937,6 +943,10 @@ main(
                         fprintf( out_file_fp, "%s\n", from_data_p  );
                         fprintf( out_file_fp, "%s\n", tag_1_data_p );
                         fprintf( out_file_fp, "%s\n", read_data_p  );
+
+                        //  Free storage for the tag buffers.
+                        mem_free( tag_1_data_p );   tag_1_data_p = NULL;
+                        mem_free( read_data_p  );   read_data_p  = NULL;
 
                         //  Continue with the current e-mail
                         decode_state = DS_EMAIL_BODY;
@@ -963,6 +973,11 @@ main(
                         fprintf( out_file_fp, "%s\n", tag_2_data_p );
                         fprintf( out_file_fp, "%s\n", read_data_p  );
 
+                        //  Free storage for the tag buffers.
+                        mem_free( tag_1_data_p );   tag_1_data_p = NULL;
+                        mem_free( tag_2_data_p );   tag_2_data_p = NULL;
+                        mem_free( read_data_p  );   read_data_p  = NULL;
+
                         //  Continue with the current e-mail
                         decode_state = DS_EMAIL_BODY;
                     }
@@ -977,7 +992,7 @@ main(
                         text_insert( from_data_p, MAX_LINE_L, 4, " -" );
 
                         //  Log the new e-mail
-                        log_write( MID_INFO, "main", "%s'\n", from_data_p );
+//                      log_write( MID_INFO, "main", "%s'\n", from_data_p );
 
                         //  Write the saved data to the file
                         fprintf( out_file_fp, "%s\n", from_data_p  );
@@ -987,9 +1002,10 @@ main(
                         fprintf( out_file_fp, "%s\n", read_data_p  );
 
                         //  Free storage for the tag buffers.
-                        mem_free( tag_1_data_p );
-                        mem_free( tag_2_data_p );
-                        mem_free( tag_3_data_p );
+                        mem_free( tag_1_data_p );   tag_1_data_p = NULL;
+                        mem_free( tag_2_data_p );   tag_2_data_p = NULL;
+                        mem_free( tag_3_data_p );   tag_3_data_p = NULL;
+                        mem_free( read_data_p  );   read_data_p  = NULL;
 
                         //  Set the next state.
                         decode_state = DS_EMAIL_BODY;
@@ -1007,11 +1023,20 @@ main(
             }
 
         }   while( read_data_p != END_OF_FILE );
+
+        //  Close the in and out files.
+//      log_write( MID_INFO, "main", "Close - [%X]\n",  out_file_fp );
+        file_close( out_file_fp );  out_file_fp   = NULL;
+//      log_write( MID_INFO, "main", "Close - [%X]\n",   in_file_fp );
+        file_close( in_file_fp );   in_file_fp    = NULL;
     }
 
     /************************************************************************
      *  Application Exit
      ************************************************************************/
+
+    //  Release the allocated storage
+    mem_free( from_data_p );
 
     //  Mark the end of the run in the log file
     log_write( MID_INFO, "main",
